@@ -468,7 +468,9 @@ async def audio(req: Request):
     try:
         data = await tts.mp3(m["say"], req.query_params.get("voice") or DEFAULT_VOICE)
     except Exception as e:  # fall back to the phone's own voice
+        print(f"audio {mid}: failed: {e}", flush=True)
         return JSONResponse({"error": f"Speech failed: {e}"}, status_code=500)
+    print(f"audio {mid}: {len(data) // 1024} KB sent", flush=True)
     return Response(data, media_type="audio/mpeg", headers={"Cache-Control": "private, max-age=3600"})
 
 

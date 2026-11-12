@@ -216,37 +216,57 @@
   player.preload = "auto";
   const queue = [];
   let playing = false;
+  let finishCurrent = null; // settles whatever is playing now; hush() calls it
 
-  function browserSay(text) {
-    if (!("speechSynthesis" in window)) return Promise.resolve();
-    return new Promise((done) => {
-      const u = new SpeechSynthesisUtterance(text);
-      u.rate = 1.05; u.onend = done; u.onerror = done;
-      speechSynthesis.speak(u);
+  // Each step always settles: on end, on error, when hushed, or after a
+  // timeout. A pause() or a speech engine that never fires "end" must not
+  // leave the queue stuck for good.
+  function step(start, maxMs) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (ok) => {
+        if (settled) return;
+        settled = true; clearTimeout(timer); finishCurrent = null; resolve(ok);
+      };
+      const timer = setTimeout(() => finish(false), maxMs);
+      finishCurrent = () => finish(true);
+      try { start(() => finish(true), () => finish(false)); } catch { finish(false); }
     });
   }
+  function browserSay(text) {
+    if (!("speechSynthesis" in window)) return Promise.resolve(true);
+    return step((ok) => {
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 1.05; u.onend = ok; u.onerror = ok;
+      speechSynthesis.speak(u);
+    }, 30000);
+  }
   function playUrl(url) {
-    return new Promise((ok, fail) => {
+    return step((ok, fail) => {
       player.onended = ok; player.onerror = fail;
       player.src = url;
       player.play().catch(fail);
-    });
+    }, 45000);
   }
   async function pump() {
     if (playing) return;
     playing = true;
-    while (queue.length && soundOn) {
-      const m = queue.shift();
-      const natural = naturalOk && m.natural && voiceSel.value !== "browser";
-      try {
-        if (!natural) throw 0;
-        await playUrl(`/audio/${m.id}?voice=${encodeURIComponent(voiceSel.value)}`);
-      } catch { await browserSay(m.say); }
-    }
-    playing = false;
+    try {
+      while (queue.length && soundOn) {
+        const m = queue.shift();
+        const natural = naturalOk && m.natural && voiceSel.value !== "browser";
+        const played = natural && await playUrl(`/audio/${m.id}?voice=${encodeURIComponent(voiceSel.value)}`);
+        if (!played) await browserSay(m.say);
+      }
+    } finally { playing = false; }
   }
   function speak(m) { if (!soundOn) return; queue.push(m); pump(); }
-  function hush() { queue.length = 0; player.pause(); speechSynthesis.cancel(); }
+  function hush() {
+    queue.length = 0;
+    player.pause();
+    speechSynthesis.cancel();
+    finishCurrent?.();
+  }
 
   function renderSound() { $("sound").textContent = soundOn ? "🔊 On" : "🔇 Off"; $("sound").classList.toggle("off", !soundOn); }
   $("sound").onclick = () => { soundOn = !soundOn; store.set("sound", soundOn); if (!soundOn) hush(); renderSound(); };
