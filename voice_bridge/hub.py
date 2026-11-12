@@ -102,7 +102,9 @@ class Hub:
             "speak": speak, "ts": now(), **extra,
         }
         if speak:
-            who = (s["label"] if s else "").replace("_", " ").replace(" · ", ", ").strip()
+            # Say which session is talking only when more than one is running.
+            several = sum(1 for x in self.sessions.values() if x["state"] != "ended") > 1
+            who = (s["label"] if s and several else "").replace("_", " ").replace(" · ", ", ").strip()
             m["say"] = (f"{who} asks: {text}" if kind == "question" else f"{who}: {text}") if who else text
             m["natural"] = tts.can_say(m["say"])
         self.messages.append(m)
@@ -302,7 +304,7 @@ async def api_hook(req: Request):
         block = hub.deliver(s)
         if not block:
             s["state"] = "idle"
-            hub.add(s, "system", "Finished.")
+            hub.add(s, "system", "Finished.", speak=False)
             if s["phone_mode"]:
                 s["_wake"].clear()
                 s["phone_waiting_until"] = now() + PHONE_MODE_WAIT
