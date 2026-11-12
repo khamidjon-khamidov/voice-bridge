@@ -24,8 +24,10 @@ import psutil
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse, StreamingResponse
+from starlette.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
+
+from voice_bridge.tts import DEFAULT_VOICE, VOICES, tts
 
 HOST = os.environ.get("VB_HOST", "127.0.0.1")
 PORT = int(os.environ.get("VB_PORT", "8765"))
@@ -99,6 +101,10 @@ class Hub:
             "label": s["label"] if s else "", "kind": kind, "text": text,
             "speak": speak, "ts": now(), **extra,
         }
+        if speak:
+            who = (s["label"] if s else "").replace("_", " ").replace(" · ", ", ").strip()
+            m["say"] = (f"{who} asks: {text}" if kind == "question" else f"{who}: {text}") if who else text
+            m["natural"] = tts.can_say(m["say"])
         self.messages.append(m)
         del self.messages[:-MAX_MESSAGES]
         if s and kind == "report":
@@ -441,6 +447,31 @@ async def index(_: Request):
     return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
 
 
+async def voices(_: Request):
+    return JSONResponse({
+        "available": tts.available(), "default": DEFAULT_VOICE,
+        "voices": [{"id": k, "name": v} for k, v in VOICES.items()],
+    })
+
+
+async def audio(req: Request):
+    """MP3 of one message in a natural voice, made on demand and cached."""
+    mid = req.path_params["mid"]
+    if mid == 0:  # voice preview from the picker
+        m = {"say": "Hi, this is how I sound.", "natural": True}
+    else:
+        m = next((x for x in reversed(hub.messages) if x["id"] == mid), None)
+    if m is None or not m.get("say"):
+        return JSONResponse({"error": "No such message."}, status_code=404)
+    if not (tts.available() and m.get("natural")):
+        return JSONResponse({"error": "Natural voice unavailable for this message."}, status_code=503)
+    try:
+        data = await tts.mp3(m["say"], req.query_params.get("voice") or DEFAULT_VOICE)
+    except Exception as e:  # fall back to the phone's own voice
+        return JSONResponse({"error": f"Speech failed: {e}"}, status_code=500)
+    return Response(data, media_type="audio/mpeg", headers={"Cache-Control": "private, max-age=3600"})
+
+
 async def health(_: Request):
     return JSONResponse({"ok": True, "sessions": len(hub.sessions), "phone": hub.phone_present()})
 
@@ -465,6 +496,7 @@ async def reaper() -> None:
 @contextlib.asynccontextmanager
 async def lifespan(_app):
     task = asyncio.create_task(reaper())
+    asyncio.get_running_loop().run_in_executor(None, tts.warm)  # first message plays without a cold start
     yield
     task.cancel()
 
@@ -473,6 +505,8 @@ app = Starlette(
     routes=[
         Route("/", index),
         Route("/health", health),
+        Route("/api/voices", voices),
+        Route("/audio/{mid:int}", audio),
         Route("/events", events),
         Route("/api/report", api_report, methods=["POST"]),
         Route("/api/ask", api_ask, methods=["POST"]),

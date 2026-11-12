@@ -13,6 +13,18 @@ cd "$ROOT"
 echo "==> Installing Python dependencies"
 uv sync --quiet
 
+echo "==> Downloading the natural voice model (Kokoro, ~340 MB, once)"
+MODELS="$HOME/Library/Application Support/voice-bridge/models"
+mkdir -p "$MODELS"
+for f in kokoro-v1.0.onnx voices-v1.0.bin; do
+  if [ ! -s "$MODELS/$f" ]; then
+    curl -fL --progress-bar -o "$MODELS/$f.part" \
+      "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/$f" \
+      && mv "$MODELS/$f.part" "$MODELS/$f" \
+      || echo "!! Couldn't download $f; the phone will use its own voice until you rerun install.sh"
+  fi
+done
+
 echo "==> Starting the hub with launchd (port $PORT, localhost only)"
 mkdir -p "$LOGS" "$(dirname "$PLIST")"
 cat > "$PLIST" <<EOF

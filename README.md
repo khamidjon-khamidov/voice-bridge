@@ -63,7 +63,7 @@ git clone https://github.com/khamidjon-khamidov/voice-bridge ~/tools/voice-bridg
 
 `install.sh` is safe to run again. It:
 
-1. installs dependencies (`uv sync`; uv fetches Python 3.12 if needed);
+1. installs dependencies (`uv sync`; uv fetches Python 3.12 if needed) and downloads the Kokoro voice model (~340 MB, once) to `~/Library/Application Support/voice-bridge/models`;
 2. starts the hub as a launchd agent (`com.voicebridge.hub`, starts at login, restarts if it dies), listening on `127.0.0.1:8765` only;
 3. adds hooks, `MCP_TOOL_TIMEOUT` and tool permissions to `~/.claude/settings.json` (backup: `settings.json.bak-voice-bridge`);
 4. adds the rules in [`CLAUDE_RULES.md`](CLAUDE_RULES.md) to `~/.claude/CLAUDE.md` between marker comments;
@@ -100,6 +100,12 @@ Screen for a full-screen app.
   speech language next to it.
 - Spoken messages start with the session name, so you know who's talking.
 - **🔊 / 🔇** mutes speech on this phone.
+- **Voice**: messages are spoken in a natural voice made on the Mac by
+  [Kokoro](https://github.com/thewh1teagle/kokoro-onnx) (open source, runs offline,
+  about a second per message, ~40 KB of audio each). The phone only plays the
+  MP3. Pick a voice in the bottom bar; picking one plays a sample. Text that isn't
+  English, or any failure, falls back to the phone's own voice, also selectable
+  as *Phone voice*.
 
 ### Limits
 
@@ -119,6 +125,8 @@ Environment variables, set in the launchd plist (`~/Library/LaunchAgents/com.voi
 | `VB_PORT` | `8765` | Hub port (`VB_PORT=… scripts/install.sh` writes it into the plist) |
 | `VB_ASK_TIMEOUT` | `900` | Seconds `ask_user` waits for an answer |
 | `VB_PHONE_MODE_WAIT` | `1800` | Seconds a finished session waits for a phone instruction in phone mode |
+| `VB_TTS_VOICE` | `af_heart` | Default natural voice (see `voice_bridge/tts.py`) |
+| `VB_TTS_SPEED` | `1.05` | Natural voice speed |
 | `VB_HUB_URL` | `http://127.0.0.1:8765` | Where the helper and hooks find the hub |
 
 If you raise `VB_ASK_TIMEOUT` above 20 minutes, raise `MCP_TOOL_TIMEOUT` (ms) in
@@ -148,6 +156,7 @@ tailscale serve reset   # if you don't use serve for anything else
 voice_bridge/hub.py             hub: phone page, API, session registry
 voice_bridge/helper.py          MCP server (FastMCP, stdio): report, ask_user
 voice_bridge/hook.py            hook script for SessionStart/UserPromptSubmit/PostToolUse/Notification/Stop/SessionEnd
+voice_bridge/tts.py             natural voice (Kokoro → MP3)
 voice_bridge/common.py          finds the parent Claude process (session key)
 voice_bridge/static/index.html  phone page
 scripts/install.sh, uninstall.sh, configure_claude.py

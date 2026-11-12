@@ -54,7 +54,7 @@
   .icon-btn { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; font-size: 14px; }
   .icon-btn.off { color: var(--muted); }
 
-  main { padding: 12px 16px calc(210px + env(safe-area-inset-bottom, 0px)); max-width: 640px; margin: 0 auto; }
+  main { padding: 12px 16px calc(240px + env(safe-area-inset-bottom, 0px)); max-width: 640px; margin: 0 auto; }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 18px 4px 8px; font-weight: 600; }
   .empty { color: var(--muted); font-size: 14px; padding: 4px; }
 
@@ -106,7 +106,7 @@
     touch-action: none;
   }
   .talk.rec { background: var(--bad); transform: scale(0.98); }
-  .bar-small { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 13px; color: var(--muted); gap: 8px; }
+  .bar-small { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 13px; color: var(--muted); gap: 8px; }
   .bar-small label { display: flex; align-items: center; gap: 6px; }
   .bar-small select { font-size: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 2px 4px; }
 
@@ -164,6 +164,7 @@
     <button class="talk" id="talk">Hold to talk</button>
     <div class="bar-small">
       <label><input type="checkbox" id="autoSend"> Send voice right away</label>
+      <select id="voice" aria-label="Voice"><option value="browser">Phone voice (robotic)</option></select>
       <select id="lang" aria-label="Speech language">
         <option value="en-US">English</option>
         <option value="ru-RU">Русский</option>
@@ -206,17 +207,75 @@
   }
 
   // ---------- speech out ----------
-  function speak(text) {
-    if (!soundOn || !("speechSynthesis" in window)) return;
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.05;
-    speechSynthesis.speak(u);
+  // Natural voice: the hub makes an MP3 per message (Kokoro, on the Mac) and
+  // this page plays them in order. Anything that fails falls back to the
+  // phone's built-in voice, which also covers non-English text.
+  const voiceSel = $("voice");
+  let naturalOk = false;
+  const player = new Audio();
+  player.preload = "auto";
+  const queue = [];
+  let playing = false;
+
+  function browserSay(text) {
+    if (!("speechSynthesis" in window)) return Promise.resolve();
+    return new Promise((done) => {
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 1.05; u.onend = done; u.onerror = done;
+      speechSynthesis.speak(u);
+    });
   }
+  function playUrl(url) {
+    return new Promise((ok, fail) => {
+      player.onended = ok; player.onerror = fail;
+      player.src = url;
+      player.play().catch(fail);
+    });
+  }
+  async function pump() {
+    if (playing) return;
+    playing = true;
+    while (queue.length && soundOn) {
+      const m = queue.shift();
+      const natural = naturalOk && m.natural && voiceSel.value !== "browser";
+      try {
+        if (!natural) throw 0;
+        await playUrl(`/audio/${m.id}?voice=${encodeURIComponent(voiceSel.value)}`);
+      } catch { await browserSay(m.say); }
+    }
+    playing = false;
+  }
+  function speak(m) { if (!soundOn) return; queue.push(m); pump(); }
+  function hush() { queue.length = 0; player.pause(); speechSynthesis.cancel(); }
+
   function renderSound() { $("sound").textContent = soundOn ? "🔊 On" : "🔇 Off"; $("sound").classList.toggle("off", !soundOn); }
-  $("sound").onclick = () => { soundOn = !soundOn; store.set("sound", soundOn); if (!soundOn) speechSynthesis.cancel(); renderSound(); };
+  $("sound").onclick = () => { soundOn = !soundOn; store.set("sound", soundOn); if (!soundOn) hush(); renderSound(); };
   renderSound();
 
+  fetch("/api/voices").then((r) => r.json()).then((v) => {
+    naturalOk = v.available;
+    const saved = store.get("voice", v.default);
+    voiceSel.innerHTML = (v.available ? v.voices.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("") : "")
+      + `<option value="browser">Phone voice (robotic)</option>`;
+    voiceSel.value = [...voiceSel.options].some((o) => o.value === saved) ? saved : (v.available ? v.default : "browser");
+  }).catch(() => {});
+  voiceSel.onchange = () => {
+    store.set("voice", voiceSel.value);
+    hush();
+    speak({ id: 0, say: "Hi, this is how I sound.", natural: true });
+  };
+
+  // A 0.1 s silent WAV, played inside the Start tap so the phone lets this page play audio later.
+  function silentWav() {
+    const n = 2400, b = new DataView(new ArrayBuffer(44 + n * 2));
+    const w = (o, s) => [...s].forEach((c, i) => b.setUint8(o + i, c.charCodeAt(0)));
+    w(0, "RIFF"); b.setUint32(4, 36 + n * 2, true); w(8, "WAVEfmt "); b.setUint32(16, 16, true);
+    b.setUint16(20, 1, true); b.setUint16(22, 1, true); b.setUint32(24, 24000, true); b.setUint32(28, 48000, true);
+    b.setUint16(32, 2, true); b.setUint16(34, 16, true); w(36, "data"); b.setUint32(40, n * 2, true);
+    return URL.createObjectURL(new Blob([b], { type: "audio/wav" }));
+  }
   $("unlockBtn").onclick = () => {
+    try { player.src = silentWav(); player.play().catch(() => {}); } catch {}
     try { speechSynthesis.speak(new SpeechSynthesisUtterance(" ")); } catch {}
     $("unlock").remove();
   };
@@ -341,9 +400,8 @@
     feed.push(m); if (feed.length > 300) feed.shift();
     if (m.replay || !m.speak || spoken.has(m.id)) return;
     spoken.add(m.id);
-    const who = m.label ? m.label.replace(" · ", ", ") : "Voice bridge";
-    if (m.kind === "question") { speak(`${who} asks: ${m.text}`); navigator.vibrate?.([120, 80, 120]); }
-    else speak(`${who}: ${m.text}`);
+    if (m.kind === "question") navigator.vibrate?.([120, 80, 120]);
+    speak(m);
   }
 
   function connect() {
@@ -374,7 +432,7 @@
   let rec = null, finalText = "", holding = false;
   function startRec() {
     if (!SR || rec) return;
-    speechSynthesis.cancel();
+    hush();
     finalText = "";
     rec = new SR();
     rec.lang = lang.value; rec.continuous = true; rec.interimResults = true;
