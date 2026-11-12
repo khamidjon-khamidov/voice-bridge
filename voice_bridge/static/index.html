@@ -54,7 +54,7 @@
   .icon-btn { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; font-size: 14px; }
   .icon-btn.off { color: var(--muted); }
 
-  main { padding: 12px 16px calc(240px + env(safe-area-inset-bottom, 0px)); max-width: 640px; margin: 0 auto; }
+  main { padding: 12px 16px calc(200px + env(safe-area-inset-bottom, 0px)); max-width: 640px; margin: 0 auto; }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 18px 4px 8px; font-weight: 600; }
   .empty { color: var(--muted); font-size: 14px; padding: 4px; }
 
@@ -106,9 +106,35 @@
     touch-action: none;
   }
   .talk.rec { background: var(--bad); transform: scale(0.98); }
-  .bar-small { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 13px; color: var(--muted); gap: 8px; }
-  .bar-small label { display: flex; align-items: center; gap: 6px; }
-  .bar-small select { font-size: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 2px 4px; }
+  .sheet-bg {
+    position: fixed; inset: 0; z-index: 25; background: rgb(0 0 0 / .35);
+    display: flex; align-items: flex-end; justify-content: center;
+  }
+  .sheet-bg[hidden] { display: none; }
+  .sheet {
+    background: var(--bg); width: 100%; max-width: 640px; max-height: 85dvh;
+    border-radius: 18px 18px 0 0; display: flex; flex-direction: column;
+    animation: up 220ms cubic-bezier(.2, .8, .2, 1);
+  }
+  @keyframes up { from { transform: translateY(24px); opacity: .6; } }
+  @media (prefers-reduced-motion: reduce) { .sheet { animation: none; } }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .done { background: var(--accent); color: var(--accent-text); border-radius: 10px; padding: 8px 16px; font-weight: 600; }
+  .sheet-body {
+    overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+    padding: 0 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+  .hint { color: var(--muted); font-size: 13px; margin: -4px 4px 8px; }
+  .opt {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
+    min-height: 52px; padding: 10px 14px; margin-bottom: 6px; text-align: left;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  }
+  .opt.on { border-color: var(--sel); box-shadow: 0 0 0 1px var(--sel); }
+  .opt .tick { color: var(--accent); font-weight: 700; visibility: hidden; }
+  .opt.on .tick { visibility: visible; }
+  .opt small { display: block; color: var(--muted); font-size: 13px; }
+  .opt input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--accent); }
 
   .toast {
     position: fixed; left: 50%; top: calc(64px + env(safe-area-inset-top, 0px)); transform: translateX(-50%);
@@ -141,6 +167,7 @@
   <h1><span class="dot" id="dot"></span>Voice bridge</h1>
   <button class="icon-btn" id="statusAll">Status: all</button>
   <button class="icon-btn" id="sound">🔊 On</button>
+  <button class="icon-btn" id="settingsBtn" aria-label="Settings">⚙︎</button>
 </header>
 
 <main>
@@ -162,14 +189,23 @@
       <button class="send" type="submit">Send</button>
     </form>
     <button class="talk" id="talk">Hold to talk</button>
-    <div class="bar-small">
-      <label><input type="checkbox" id="autoSend"> Send voice right away</label>
-      <select id="voice" aria-label="Voice"><option value="browser">Phone voice (robotic)</option></select>
-      <select id="lang" aria-label="Speech language">
-        <option value="en-US">English</option>
-        <option value="ru-RU">Русский</option>
-        <option value="uz-UZ">Oʻzbekcha</option>
-      </select>
+  </div>
+</div>
+
+<div class="sheet-bg" id="sheet" hidden>
+  <div class="sheet" role="dialog" aria-label="Settings">
+    <div class="sheet-head">
+      <b>Settings</b>
+      <button class="done" id="sheetDone">Done</button>
+    </div>
+    <div class="sheet-body">
+      <h2>Claude's voice</h2>
+      <p class="hint">Tap one to hear it.</p>
+      <div id="voiceList"></div>
+      <h2>I speak in</h2>
+      <div id="langList"></div>
+      <h2>Talking</h2>
+      <label class="opt"><span>Send as soon as I let go</span><input type="checkbox" id="autoSend"></label>
     </div>
   </div>
 </div>
@@ -210,7 +246,8 @@
   // Natural voice: the hub makes an MP3 per message (Kokoro, on the Mac) and
   // this page plays them in order. Anything that fails falls back to the
   // phone's built-in voice, which also covers non-English text.
-  const voiceSel = $("voice");
+  const voiceSel = { value: store.get("voice", "af_heart") }; // chosen in the settings sheet
+  const lang = { value: store.get("lang", "en-US") };
   let naturalOk = false;
   const player = new Audio();
   player.preload = "auto";
@@ -272,18 +309,42 @@
   $("sound").onclick = () => { soundOn = !soundOn; store.set("sound", soundOn); if (!soundOn) hush(); renderSound(); };
   renderSound();
 
+  // ---------- settings sheet ----------
+  let voiceOptions = [{ id: "browser", name: "Phone voice · robotic" }];
+  const langOptions = [
+    { id: "en-US", name: "English" }, { id: "ru-RU", name: "Русский" }, { id: "uz-UZ", name: "Oʻzbekcha" },
+  ];
+  function optRows(list, current, attr) {
+    return list.map((o) => {
+      const [name, sub] = o.name.split(" · ");
+      return `<button class="opt ${o.id === current ? "on" : ""}" ${attr}="${o.id}">
+        <span>${esc(name)}${sub ? `<small>${esc(sub)}</small>` : ""}</span><span class="tick">✓</span></button>`;
+    }).join("");
+  }
+  function renderSheet() {
+    $("voiceList").innerHTML = optRows(voiceOptions, voiceSel.value, "data-voice");
+    $("langList").innerHTML = optRows(langOptions, lang.value, "data-lang");
+  }
+  $("settingsBtn").onclick = () => { renderSheet(); $("sheet").hidden = false; };
+  $("sheetDone").onclick = () => { $("sheet").hidden = true; };
+  $("sheet").addEventListener("click", (e) => {
+    if (e.target === $("sheet")) { $("sheet").hidden = true; return; }
+    const b = e.target.closest("button");
+    if (b?.dataset.voice) {
+      voiceSel.value = b.dataset.voice; store.set("voice", voiceSel.value); renderSheet();
+      hush(); speak({ id: 0, say: "Hi, this is how I sound.", natural: true });
+    } else if (b?.dataset.lang) {
+      lang.value = b.dataset.lang; store.set("lang", lang.value); renderSheet();
+    }
+  });
+
   fetch("/api/voices").then((r) => r.json()).then((v) => {
     naturalOk = v.available;
+    voiceOptions = (v.available ? v.voices : []).concat([{ id: "browser", name: "Phone voice · robotic" }]);
     const saved = store.get("voice", v.default);
-    voiceSel.innerHTML = (v.available ? v.voices.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("") : "")
-      + `<option value="browser">Phone voice (robotic)</option>`;
-    voiceSel.value = [...voiceSel.options].some((o) => o.value === saved) ? saved : (v.available ? v.default : "browser");
+    voiceSel.value = voiceOptions.some((o) => o.id === saved) ? saved : (v.available ? v.default : "browser");
+    renderSheet();
   }).catch(() => {});
-  voiceSel.onchange = () => {
-    store.set("voice", voiceSel.value);
-    hush();
-    speak({ id: 0, say: "Hi, this is how I sound.", natural: true });
-  };
 
   // A 0.1 s silent WAV, played inside the Start tap so the phone lets this page play audio later.
   function silentWav() {
@@ -439,11 +500,9 @@
   setInterval(render, 30000); // keep "Xm ago" fresh
 
   // ---------- speech in ----------
-  const autoSend = $("autoSend"), lang = $("lang"), talk = $("talk");
+  const autoSend = $("autoSend"), talk = $("talk");
   autoSend.checked = store.get("autoSend", true);
   autoSend.onchange = () => store.set("autoSend", autoSend.checked);
-  lang.value = store.get("lang", "en-US");
-  lang.onchange = () => store.set("lang", lang.value);
 
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!window.isSecureContext) { talk.disabled = true; talk.textContent = "Voice needs HTTPS (use tailscale serve)"; }

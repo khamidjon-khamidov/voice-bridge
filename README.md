@@ -95,15 +95,16 @@ Screen for a full-screen app.
 
 - **Waiting for you** lists open questions, oldest first. The bar at the bottom
   says who you're answering; tap a question or a session's **Message** to change it.
-- **Hold to talk**: speak and release; it sends as soon as you let go. Untick
-  *Send voice right away* to check the text and press **Send** yourself. Choose the
-  speech language next to it.
+- **Hold to talk**: speak and release; it sends as soon as you let go.
+- **⚙︎ Settings**: Claude's voice (tap one to hear a sample), the language you
+  speak in, and whether voice sends as soon as you let go (untick it to check the
+  text and press **Send** yourself).
 - Spoken messages start with the session name, so you know who's talking.
 - **🔊 / 🔇** mutes speech on this phone.
 - **Voice**: messages are spoken in a natural voice made on the Mac by
   [Kokoro](https://github.com/thewh1teagle/kokoro-onnx) (open source, runs offline,
   about a second per message, ~40 KB of audio each). The phone only plays the
-  MP3. Pick a voice in the bottom bar; picking one plays a sample. Text that isn't
+  MP3. Pick a voice in ⚙︎ Settings. Text that isn't
   English, or any failure, falls back to the phone's own voice, also selectable
   as *Phone voice*.
 
