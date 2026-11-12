@@ -476,6 +476,19 @@ async def audio(req: Request):
     return Response(data, media_type="audio/mpeg", headers={"Cache-Control": "private, max-age=3600"})
 
 
+DOWNLOADS = STATE_FILE.parent / "downloads"
+
+
+async def download(req: Request):
+    """Phone app builds dropped into ~/Library/Application Support/voice-bridge/downloads."""
+    name = Path(req.path_params["name"]).name  # no directories, no ..
+    path = DOWNLOADS / name
+    if not name.endswith(".apk") or not path.is_file():
+        return JSONResponse({"error": "No such file."}, status_code=404)
+    return FileResponse(path, media_type="application/vnd.android.package-archive", filename=name,
+                        headers={"Cache-Control": "no-store"})
+
+
 async def health(_: Request):
     return JSONResponse({"ok": True, "sessions": len(hub.sessions), "phone": hub.phone_present()})
 
@@ -511,6 +524,7 @@ app = Starlette(
         Route("/health", health),
         Route("/api/voices", voices),
         Route("/audio/{mid:int}", audio),
+        Route("/download/{name}", download),
         Route("/events", events),
         Route("/api/report", api_report, methods=["POST"]),
         Route("/api/ask", api_ask, methods=["POST"]),
