@@ -95,8 +95,9 @@ Screen for a full-screen app.
 
 - **Waiting for you** lists open questions, oldest first. The bar at the bottom
   says who you're answering; tap a question or a session's **Message** to change it.
-- **Hold to talk**: speak, release, check the text, then **Send**. Tick
-  *Send voice right away* to skip the check. Choose the speech language next to it.
+- **Hold to talk**: speak and release; it sends as soon as you let go. Untick
+  *Send voice right away* to check the text and press **Send** yourself. Choose the
+  speech language next to it.
 - Spoken messages start with the session name, so you know who's talking.
 - **🔊 / 🔇** mutes speech on this phone.
 

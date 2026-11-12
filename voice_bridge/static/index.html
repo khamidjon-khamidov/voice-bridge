@@ -362,7 +362,7 @@
 
   // ---------- speech in ----------
   const autoSend = $("autoSend"), lang = $("lang"), talk = $("talk");
-  autoSend.checked = store.get("autoSend", false);
+  autoSend.checked = store.get("autoSend", true);
   autoSend.onchange = () => store.set("autoSend", autoSend.checked);
   lang.value = store.get("lang", "en-US");
   lang.onchange = () => store.set("lang", lang.value);
