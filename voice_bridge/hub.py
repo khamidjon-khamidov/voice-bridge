@@ -153,6 +153,8 @@ class Hub:
             parts.append(STATUS_PROMPT)
         if s["inbox"]:
             parts += [f"Message from the user, sent from their phone: {t}" for t in s["inbox"]]
+            parts.append("The user is listening on their phone: answer them with the voice-bridge "
+                         "`report` tool (under two sentences), as well as in the terminal.")
             s["inbox"].clear()
             self.add(s, "system", "Delivered to Claude.", speak=False)
         return "\n".join(parts) or None
@@ -319,13 +321,16 @@ async def api_instruct(req: Request):
         return JSONResponse({"error": "Empty message."}, status_code=400)
     s["inbox"].append(text)
     hub.add(s, "instruction", text, speak=False)
+    delivery = "next_step"
     if s["phone_waiting_until"]:
         s["_wake"].set()
+        delivery = "now"
     elif s["state"] == "idle":
-        hub.add(s, "system", "Queued. Claude is idle, so it gets this with your next prompt "
-                "(turn on phone mode to wake it from here).", speak=False)
+        delivery = "queued_idle"
+        hub.add(s, "system", "Claude is idle, so this waits for your next terminal prompt. "
+                "Turn on phone mode to wake it from the phone.")
     hub.changed()
-    return JSONResponse({"ok": True})
+    return JSONResponse({"ok": True, "delivery": delivery})
 
 
 async def api_phone_mode(req: Request):
