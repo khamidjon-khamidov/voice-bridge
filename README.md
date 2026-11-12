@@ -30,10 +30,15 @@ its own card.
 - **Message**: send Claude a new instruction. A working session gets it on its
   next tool call; an idle one gets it with your next prompt, or right away in
   phone mode.
-- **Phone mode** (per session, off by default): when Claude finishes, it waits
-  (up to 30 min) for your next instruction from the phone instead of stopping, so
-  you can keep a session going hands-free. While it waits the terminal looks busy;
-  press `Esc` there to take it back.
+- **Phone mode** (per session): when Claude finishes, it waits (up to 30 min)
+  for your next instruction from the phone instead of stopping, and answers you
+  out loud. It switches itself: **on** when you message or answer from the phone,
+  **off** when you type a prompt in the terminal (you're back at the desk). You can
+  also flip it on the card. It's remembered across hub restarts
+  (`~/Library/Application Support/voice-bridge/state.json`, with custom session names).
+  While Claude waits, the terminal looks busy; press `Esc` there to take it back.
+  A message to a session that has already stopped still waits for your next
+  terminal prompt: nothing can wake a finished Claude from outside.
 - **Needs you at the terminal**: permission prompts are announced on the phone.
   You can't approve them from the phone.
 
@@ -102,7 +107,7 @@ Screen for a full-screen app.
   aloud then.
 - Status reaches a working Claude on its next tool call; during one long command
   (a 10-minute build) it waits for that to finish.
-- History is kept in memory; restarting the hub clears it.
+- Message history is kept in memory; restarting the hub clears it (phone mode and names are kept).
 
 ## Configuration
 

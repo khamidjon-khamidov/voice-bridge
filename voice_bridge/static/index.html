@@ -257,7 +257,7 @@
     picked = null;
     $("input").value = "";
     if (t.kind === "answer") toast("Answer sent");
-    else if (res.delivery === "queued_idle") toast("Queued: Claude is idle. Turn on Phone mode to wake it from here.", false, 5000);
+    else if (res.delivery === "queued_idle") toast("Queued: Claude had already stopped, so it reads this at your next terminal prompt. Phone mode is on from then.", false, 6000);
     else if (res.delivery === "now") toast("Sent: Claude is picking it up");
     else toast("Sent: Claude gets it on its next step");
   }

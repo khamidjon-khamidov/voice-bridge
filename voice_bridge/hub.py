@@ -35,6 +35,9 @@ PHONE_GRACE = 600  # a phone seen this recently still counts as "connected"
 ENDED_TTL = 3600  # ended sessions stay on the page this long
 MAX_MESSAGES = 500
 STATIC = Path(__file__).parent / "static"
+# Phone mode and custom names per session survive hub restarts here.
+STATE_FILE = Path(os.environ.get(
+    "VB_STATE_FILE", Path.home() / "Library" / "Application Support" / "voice-bridge" / "state.json"))
 
 STATUS_PROMPT = (
     "The user pressed Status on their phone. Call the voice-bridge `report` tool "
@@ -49,6 +52,7 @@ def now() -> float:
 class Hub:
     def __init__(self) -> None:
         self.sessions: dict[str, dict] = {}
+        self.saved: dict[str, dict] = self._load()
         self.messages: list[dict] = []
         self.questions: dict[str, dict] = {}
         self.subscribers: set[asyncio.Queue] = set()
@@ -115,11 +119,12 @@ class Hub:
             cwd = d.get("cwd") or ""
             name = Path(cwd).name or "session"
             branch = d.get("branch")
+            saved = self.saved.get(key, {})
             s = {
-                "id": key, "label": self._unique_label(f"{name} · {branch}" if branch else name),
-                "auto_label": True, "cwd": cwd, "branch": branch, "pid": d.get("pid"),
+                "id": key, "label": self._unique_label(saved.get("label") or (f"{name} · {branch}" if branch else name)),
+                "auto_label": not saved.get("label"), "cwd": cwd, "branch": branch, "pid": d.get("pid"),
                 "claude_session_id": d.get("claude_session_id"), "state": "working", "last": "",
-                "phone_mode": False, "phone_waiting_until": None, "status_requested": False,
+                "phone_mode": bool(saved.get("phone_mode")), "phone_waiting_until": None, "status_requested": False,
                 "inbox": [], "started": now(), "updated": now(), "_wake": asyncio.Event(),
             }
             self.sessions[key] = s
@@ -137,6 +142,37 @@ class Hub:
                 s["state"] = "working"
         s["updated"] = now()
         return s
+
+    # ---------- saved state ----------
+    @staticmethod
+    def _load() -> dict:
+        try:
+            data = json.loads(STATE_FILE.read_text())
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def save(self) -> None:
+        for s in self.sessions.values():
+            entry = {"phone_mode": s["phone_mode"], "label": None if s["auto_label"] else s["label"]}
+            if s["state"] == "ended" or not (entry["phone_mode"] or entry["label"]):
+                self.saved.pop(s["id"], None)
+            else:
+                self.saved[s["id"]] = entry
+        try:
+            STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            STATE_FILE.write_text(json.dumps(self.saved))
+        except Exception:
+            pass
+
+    def set_phone_mode(self, s: dict, on: bool, why: str) -> None:
+        if s["phone_mode"] == on:
+            return
+        s["phone_mode"] = on
+        if not on:
+            s["_wake"].set()  # release a waiting Stop hook
+        self.add(s, "system", why, speak=False)
+        self.save()
 
     def _unique_label(self, label: str, own: str | None = None) -> str:
         taken = {x["label"] for x in self.sessions.values() if x["state"] != "ended" and x["id"] != own}
@@ -240,6 +276,10 @@ async def api_hook(req: Request):
         s["state"] = "idle"
     elif ev == "UserPromptSubmit":
         s["state"] = "working"
+        # Typing in the terminal means you're back at the desk, unless this
+        # prompt is just carrying phone messages that were waiting.
+        if not s["inbox"]:
+            hub.set_phone_mode(s, False, "Phone mode off: you typed in the terminal.")
         context = hub.deliver(s)
     elif ev == "PostToolUse":
         if s["state"] in ("idle", "needs_terminal"):
@@ -284,6 +324,8 @@ async def api_answer(req: Request):
         s["state"] = "working"
     hub.add(s, "answer", q["answer"], speak=False, qid=d.get("qid"))
     q["event"].set()
+    if s:
+        hub.set_phone_mode(s, True, "Phone mode on: you answered from the phone.")
     hub.changed()
     return JSONResponse({"ok": True})
 
@@ -321,14 +363,15 @@ async def api_instruct(req: Request):
         return JSONResponse({"error": "Empty message."}, status_code=400)
     s["inbox"].append(text)
     hub.add(s, "instruction", text, speak=False)
+    hub.set_phone_mode(s, True, "Phone mode on: you're messaging from the phone.")
     delivery = "next_step"
     if s["phone_waiting_until"]:
         s["_wake"].set()
         delivery = "now"
     elif s["state"] == "idle":
         delivery = "queued_idle"
-        hub.add(s, "system", "Claude is idle, so this waits for your next terminal prompt. "
-                "Turn on phone mode to wake it from the phone.")
+        hub.add(s, "system", "Claude had already stopped, so this one waits for your next terminal "
+                "prompt. After that, phone mode keeps it listening to the phone.")
     hub.changed()
     return JSONResponse({"ok": True, "delivery": delivery})
 
@@ -338,9 +381,8 @@ async def api_phone_mode(req: Request):
     s, err = session_or_404(d.get("id"))
     if err:
         return err
-    s["phone_mode"] = bool(d.get("on"))
-    if not s["phone_mode"]:
-        s["_wake"].set()  # release a waiting Stop hook
+    on = bool(d.get("on"))
+    hub.set_phone_mode(s, on, "Phone mode on." if on else "Phone mode off.")
     hub.changed()
     return JSONResponse({"ok": True})
 
@@ -353,6 +395,7 @@ async def api_label(req: Request):
     label = (d.get("label") or "").strip()[:40]
     if label:
         s["label"], s["auto_label"] = hub._unique_label(label, s["id"]), False
+        hub.save()
     hub.changed()
     return JSONResponse({"ok": True})
 
@@ -415,6 +458,7 @@ async def reaper() -> None:
                 del hub.sessions[key]
                 dirty = True
         if dirty:
+            hub.save()
             hub.changed()
 
 
